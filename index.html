@@ -57,10 +57,10 @@ h2{font-family:var(--wordmark);font-size:30px;letter-spacing:1px;color:var(--ink
 .spot{position:absolute;transform:translate(-50%,-50%);border:0;padding:0;cursor:pointer;
   font-family:var(--mono);font-size:11px;font-weight:700;line-height:1;
   background:var(--amber);color:#140c04;border-radius:50%;
-  width:9px;height:9px;text-indent:-999em;overflow:hidden;
+  width:7px;height:7px;text-indent:-999em;overflow:hidden;
   box-shadow:0 0 0 2px rgba(10,6,4,.75)}
 .fig.narrow .spot{width:21px;height:21px;text-indent:0;line-height:21px;text-align:center}
-.spot:hover,.spot.on{background:var(--ink);box-shadow:0 0 0 4px rgba(242,168,30,.35)}
+.spot:hover,.spot.on{background:var(--ink);box-shadow:0 0 0 3px rgba(242,168,30,.4)}
 .spot:focus-visible{outline:2px solid var(--amber-hi);outline-offset:3px}
 
 .note{width:100%}
@@ -133,7 +133,7 @@ h2{font-family:var(--wordmark);font-size:30px;letter-spacing:1px;color:var(--ink
 <main id="main"></main>
 
 <div class="foot">
-  <span>shot on REV 969</span>
+  <span>MANUAL REV 002 · shot on REV 969</span>
   <span><a href="https://snadbreugen.github.io/Brachinski/">open the machine</a></span>
 </div>
 
@@ -264,6 +264,32 @@ function stackTops(wants,heights,gap){
   }
   return top;
 }
+// two leader lines cross when their callouts sit in a different order than their anchors
+// the stubs at the column edge are short, so the sloping part decides it
+function segCross(a,b){
+  const d=(p,q,r)=>(q.x-p.x)*(r.y-p.y)-(q.y-p.y)*(r.x-p.x);
+  const s1=Math.sign(d(a.p,a.q,b.p)), s2=Math.sign(d(a.p,a.q,b.q));
+  const s3=Math.sign(d(b.p,b.q,a.p)), s4=Math.sign(d(b.p,b.q,a.q));
+  return s1!==s2 && s3!==s4 && s1!==0 && s2!==0 && s3!==0 && s4!==0;
+}
+function countCross(segs){
+  let n=0;
+  for(let i=0;i<segs.length;i++)for(let j=i+1;j<segs.length;j++)if(segCross(segs[i],segs[j]))n++;
+  return n;
+}
+function unknot(list,build){                                                   // swap neighbours as long as it buys fewer crossings
+  let best=countCross(build(list)), guard=0;
+  while(best>0&&guard++<40){
+    let moved=false;
+    for(let i=0;i<list.length-1;i++){
+      const t=list.slice(); const x=t[i]; t[i]=t[i+1]; t[i+1]=x;
+      const c=countCross(build(t));
+      if(c<best){ best=c; list=t; moved=true; }
+    }
+    if(!moved)break;
+  }
+  return list;
+}
 const NS="http://www.w3.org/2000/svg";
 const main=document.getElementById("main"), tabs=document.getElementById("tabs");
 const WIDE_AT=1180;
@@ -364,16 +390,27 @@ function buildPlate(v){
     const ox=I.left-F.left, oy=I.top-F.top;
 
     // each callout wants to sit level with its part, then they push each other apart
-    const place=list=>{
+    const place=(list,side)=>{
       list.forEach(n=>{ n._h=n._note.offsetHeight;
         n._want=oy+(n.y/100)*I.height-n._h/2; });
-      list.sort((a,b)=>a._want-b._want);
+      const dir=side==="L"?1:-1;
+      list.sort((a,b)=>(a._want-b._want)||dir*(a.x-b.x));                      // same height :: the nearer anchor goes to the upper callout
+      const colX=side==="L"?(gl.getBoundingClientRect().right-F.left)
+                           :(gr.getBoundingClientRect().left-F.left);
+      const build=order=>{
+        const tops=stackTops(order.map(n=>n._want),order.map(n=>n._h),14);
+        return order.map((n,i)=>({
+          p:{x:colX+(side==="L"?18:-18), y:tops[i]+n._h/2},
+          q:{x:ox+(n.x/100)*I.width, y:oy+(n.y/100)*I.height}}));
+      };
+      list=unknot(list,build);
       const tops=stackTops(list.map(n=>n._want),list.map(n=>n._h),14);
       list.forEach((n,i)=>{ n._top=tops[i]; n._note.style.top=tops[i]+"px"; });
+      return list;
     };
     gl.classList.add("placed"); gr.classList.add("placed");
-    place(v.notes.filter(n=>n.side==="L"));
-    place(v.notes.filter(n=>n.side==="R"));
+    place(v.notes.filter(n=>n.side==="L"),"L");
+    place(v.notes.filter(n=>n.side==="R"),"R");
 
     svg.setAttribute("viewBox","0 0 "+F.width+" "+F.height);
     svg.innerHTML="";
